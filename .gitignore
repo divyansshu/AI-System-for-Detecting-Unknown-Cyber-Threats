@@ -1,0 +1,3 @@
+# Ignore large data files
+data/CIC-IDS2017/
+data/CICIOT23/
