@@ -1,0 +1,20 @@
+[project]
+name = "zero-day-detector"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.135.1",
+    "joblib>=1.5.3",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.3",
+    "pandas>=3.0.1",
+    "plotly>=6.6.0",
+    "pydantic>=2.12.5",
+    "scikit-learn>=1.8.0",
+    "streamlit>=1.9.0",
+    "tensorflow>=2.21.0",
+    "uvicorn>=0.42.0",
+    "xgboost>=3.2.0",
+]
