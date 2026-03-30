@@ -1,90 +1,114 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 import joblib
+import json
 import numpy as np
 from pydantic import BaseModel
+from tensorflow.keras.models import load_model
+from contextlib import asynccontextmanager
 
 
-app = FastAPI()
+# global variables for our models
+scaler = None
+xgb_model = None
+autoencoder = None
+ae_threshold = 0.0
 
-# load model and scaler
-model = joblib.load('../models/isolation_model.pkl')
-scaler = joblib.load('../models/scaler.pkl')
+# 2. Define the Input Data Schema
+class NetworkTraffic(BaseModel):
+    features: list[float]
+    
+    
+# 3. Load models on startup
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global scaler, xgb_model, autoencoder, ae_threshold
+    print('Initializing SOC Pipeline...')
+    
+    try:
+        
+        # load the preprocessing scaler
+        scaler = joblib.load('../models/robust_scaler.pkl')
+        if not scaler: print('No xgb')
+        
+        # load Stage 1: XGBoost Supervised Filter
+        xgb_model = joblib.load('../models/xgboost_stage1.pkl')
+        if not xgb_model: print('No xgb')
+        
+        # load stage 2: Keras Autoencoder
+        autoencoder = load_model('../models/autoencoder_stage2.h5', compile=False)
+        if not autoencoder: print('No autoencoder')
+        
+        # load the dynamic Threshold
+        with open('../models/ae_threshold.json', 'r') as f:
+            config = json.load(f)
+            ae_threshold = config['best_threshold']
+        
+        print(f'Pipeline Ready. Autoencoder Threshold set to: {ae_threshold:.4f}')
+    except Exception as e:
+        print(f'Critical Error: Failed to load the models, {e}')
+        raise RuntimeError(f'Startup aborted due to missing model files: {e}')
+    
+    yield
+    # clean up the models and resources 
+  
+# 1. Initialize the FastAPI App
+app = FastAPI(
+    title='Next-Gen Hybrid SOC Pipeline',
+    description='Two-Stage Intrusion Detection System: XGBoost + Deep Learning AutoEncoder',
+    version="1.0",
+    lifespan=lifespan
+)
 
-class NetworkFlow(BaseModel):
-    flow_duration: float
-    Header_Length: float
-    Protocol_Type: int  # Note: Pydantic model names can't have spaces
-    Duration: float
-    Rate: float
-    Drate: float
-    fin_flag_number: float
-    syn_flag_number: float
-    psh_flag_number: float
-    ack_flag_number: float
-    syn_count: float
-    fin_count: float
-    urg_count: float
-    rst_count: float
-    HTTP: float
-    HTTPS: float
-    DNS: float
-    SSH: float
-    TCP: float
-    UDP: float
-    ARP: float
-    ICMP: float
-    IPv: float
-    Tot_sum: float
-    Min: float
-    Max: float
-    AVG: float
-    Tot_size: float
-    IAT: float
-    Covariance: float
-    Variance: float
+      
+# 4. The Prediction endpoint
+@app.post('/scan-traffic')
+async def scan_network_traffic(traffic: NetworkTraffic):
+    try:
+        
+        # convert incoming json list to a 2D numpy array: shape (1, features)
+        raw_data = np.array(traffic.features).reshape(1,-1)
+        
+        # step 1: scale the raw data using the trained robustScaler
+        scaled_data = scaler.transform(raw_data)
+        
+        # step 2: the front door XGBoost
+        xgb_predictions = xgb_model.predict(scaled_data)[0]
+        
+        if xgb_predictions == 1:
+            return {
+                'action': 'Blocked',
+                'threat_type': 'Known Attack',
+                'caught_by': 'Stage 1 (XGBoost)',
+                'details': 'Matches known malicious mathematical signature'
+            }
+        
+        # step 3: The safety net autoencoder
+        # if XGBoost says it's Benign (0), we double check it for zero-days
+        reconstructions = autoencoder.predict(scaled_data, verbose=0)
+        mae_error = np.mean(np.abs(scaled_data - reconstructions), axis=1)[0]
+        
+        if mae_error > ae_threshold:
+            return {
+                'action': 'Blocked',
+                'threat_type': 'Potential Zero-day Anomaly',
+                'caught_by': 'Stage 2 (Autoencoder)',
+                'details': f'reconstruction error {mae_error:.4f} exceeded strict threshold ({ae_threshold:.4f})'
+            }
+        
+        # stage 4: All clear
+        return {
+            'action': 'Allowed',
+            'threat_type': 'None',
+            'caught_by': 'Passed Both stages',
+            'details': f'Normal traffic rhythm verified. Error: {mae_error:.4f}'        
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
 
-Feature_Names  = [
-    'flow_duration', 'Header_Length', 'Protocol Type', 'Duration', 'Rate',
-       'Drate', 'fin_flag_number', 'syn_flag_number', 'psh_flag_number',
-       'ack_flag_number', 'syn_count', 'fin_count', 'urg_count', 'rst_count',
-       'HTTP', 'HTTPS', 'DNS', 'SSH', 'TCP', 'UDP', 'ARP', 'ICMP', 'IPv',
-       'Tot sum', 'Min', 'Max', 'AVG', 'Tot size', 'IAT', 'Covariance',
-       'Variance'
-]
-
+# Health check endpoint
 @app.get('/')
-def home():
-    return {'message': 'Zero Day Attack Detection API runing'}
-
-@app.post('/detect')
-def detect(flow: NetworkFlow):
+async def root():
+    return {'message': 'Hybrid SOC Pipeline is actively monitoring'}
     
-    #convert python model to a dictionary, then to an ordered list
-    flow_dict = flow.dict()
-    print(flow_dict)
-    
-    # manually handle the keys with spaces
-    flow_dict['Protocol Type'] = flow_dict.pop('Protocol_Type')
-    flow_dict['Tot sum'] = flow_dict.pop('Tot_sum')
-    flow_dict['Tot size'] = flow_dict.pop('Tot_size')
-    
-    x = [flow_dict[col] for col in Feature_Names]
-    print('\n',x)
-    
-    #scale input
-    x_scaled = scaler.transform([x])
-    
-    # get anomaly score
-    score = -model.score_samples(x_scaled)[0]
-    
-    #threshold 
-    threshold = 0.5
-    
-    alert = score > threshold
-    
-    return {
-        "anomaly_score": float(score),
-        "alert": bool(alert),
-        "risk_level": "High" if score > 0.7 else "MEDIUM" if score > 0.5 else "LOW"
-    }
