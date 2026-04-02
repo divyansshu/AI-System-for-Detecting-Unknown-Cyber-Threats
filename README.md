@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 # 🛡️ Next-Gen Hybrid SOC Pipeline
 
@@ -41,24 +41,23 @@ The pipeline processes network traffic through two sequential ML stages:
 
 ### Stage 1 — XGBoost Supervised Filter
 
-| Aspect        | Detail                                                                 |
-|---------------|------------------------------------------------------------------------|
-| **Model**     | XGBoost binary classifier (`xgboost_stage1.pkl`)                       |
-| **Purpose**   | Detect **known** attack categories learned from labeled training data   |
-| **Output**    | `1` → Known attack → **Blocked** · `0` → Passed to Stage 2            |
+| Aspect    | Detail                                                               |
+|-----------|----------------------------------------------------------------------|
+| **Model** | XGBoost binary classifier (`xgboost_stage1.pkl`)                    |
+| **Purpose** | Detect **known** attack categories learned from labeled training data |
+| **Output** | `1` → Known attack → **Blocked** · `0` → Passed to Stage 2         |
 
 ### Stage 2 — Autoencoder Anomaly Detector
 
-| Aspect        | Detail                                                                 |
-|---------------|------------------------------------------------------------------------|
-| **Model**     | Keras deep Autoencoder (`autoencoder_stage2.h5`)                       |
-| **Purpose**   | Catch **unknown / zero-day** threats that bypassed Stage 1             |
-| **Method**    | Measures reconstruction error (MAE) against a dynamic threshold        |
-| **Threshold** | `0.1331` (stored in `ae_threshold.json`, tuned on validation data)     |
+| Aspect        | Detail                                                                    |
+|---------------|---------------------------------------------------------------------------|
+| **Model**     | Keras deep Autoencoder (`autoencoder_stage2.h5`)                          |
+| **Purpose**   | Catch **unknown / zero-day** threats that bypassed Stage 1                |
+| **Method**    | Measures reconstruction error (MAE) against a dynamic threshold           |
+| **Threshold** | `0.1331` (stored in `ae_threshold.json`, tuned on validation data)        |
 | **Output**    | MAE > threshold → **Blocked** (zero-day) · MAE ≤ threshold → **Allowed** |
 
 ### Decision Summary
-
 ```
                          ┌──────────────────────┐
     Network Traffic ───► │  Stage 1: XGBoost    │
@@ -94,7 +93,6 @@ All features are scaled using a **RobustScaler** (`robust_scaler.pkl`) before be
 - **[uv](https://docs.astral.sh/uv/)** (recommended) or `pip`
 
 ### 1. Clone the Repository
-
 ```bash
 git clone https://github.com/divyansshu/AI-System-for-Detecting-Unknown-Cyber-Threats.git
 cd AI-System-for-Detecting-Unknown-Cyber-Threats
@@ -103,13 +101,11 @@ cd AI-System-for-Detecting-Unknown-Cyber-Threats
 ### 2. Install Dependencies
 
 Using **uv** (recommended):
-
 ```bash
 uv sync
 ```
 
 Or using **pip**:
-
 ```bash
 pip install -e .
 ```
@@ -117,7 +113,6 @@ pip install -e .
 ### 3. Extract Features (Optional)
 
 If you have a raw `.pcapng` capture file and need to generate flow features:
-
 ```bash
 python extract_features.py
 ```
@@ -125,14 +120,12 @@ python extract_features.py
 > This produces `live_flows.csv` from `live_demo.pcapng` using `cicflowmeter`.
 
 ### 4. Start the API Server
-
 ```bash
 cd api
 uvicorn app:app --reload
 ```
 
 The API will be available at `http://127.0.0.1:8000`. Visit the root endpoint to confirm:
-
 ```json
 { "message": "Hybrid SOC Pipeline is actively monitoring" }
 ```
@@ -140,7 +133,6 @@ The API will be available at `http://127.0.0.1:8000`. Visit the root endpoint to
 ### 5. Launch the Dashboard
 
 In a separate terminal:
-
 ```bash
 cd dashboard
 streamlit run dashboard.py
@@ -155,23 +147,23 @@ The SOC Command Center will open at `http://localhost:8501`.
 ### Running the Full Demo
 
 1. Start the **FastAPI backend** (Terminal 1):
-   ```bash
+```bash
    cd api && uvicorn app:app --reload
-   ```
+```
 
 2. Start the **Streamlit dashboard** (Terminal 2):
-   ```bash
+```bash
    cd dashboard && streamlit run dashboard.py
-   ```
+```
 
 3. Click **▶ Start Monitoring** in the dashboard sidebar. The system will:
    - **Replay** existing packets from `live_flows.csv` (one per second)
    - Switch to **Listening Mode** once replay completes, watching for new packets
 
 4. Inject a **simulated zero-day attack** (Terminal 3):
-   ```bash
+```bash
    python unknown_attack.py
-   ```
+```
    Watch the dashboard light up with 🚨 alerts as the Autoencoder catches the anomalies!
 
 ### API Reference
@@ -181,7 +173,6 @@ The SOC Command Center will open at `http://localhost:8501`.
 Classify a single network flow.
 
 **Request Body:**
-
 ```json
 {
   "features": [443.0, 120456.0, 15.0, 8420.0, "... (44 float values)"]
@@ -190,16 +181,15 @@ Classify a single network flow.
 
 **Responses:**
 
-| Scenario             | `action`   | `threat_type`              | `caught_by`          |
-|----------------------|------------|----------------------------|----------------------|
-| Known attack         | `Blocked`  | `Known Attack`             | `Stage 1 (XGBoost)` |
-| Zero-day anomaly     | `Blocked`  | `Potential Zero-day Anomaly` | `Stage 2 (Autoencoder)` |
-| Normal traffic       | `Allowed`  | `None`                     | `Passed Both stages` |
+| Scenario         | `action`  | `threat_type`                | `caught_by`              |
+|------------------|-----------|------------------------------|--------------------------|
+| Known attack     | `Blocked` | `Known Attack`               | `Stage 1 (XGBoost)`     |
+| Zero-day anomaly | `Blocked` | `Potential Zero-day Anomaly` | `Stage 2 (Autoencoder)` |
+| Normal traffic   | `Allowed` | `None`                       | `Passed Both stages`     |
 
 #### `GET /`
 
 Health check endpoint.
-
 ```json
 { "message": "Hybrid SOC Pipeline is actively monitoring" }
 ```
@@ -214,7 +204,6 @@ FastAPI auto-generates interactive documentation:
 ---
 
 ## 📁 Project Structure
-
 ```
 zero_day_detector/
 │
@@ -257,11 +246,11 @@ The models were trained and evaluated in Jupyter notebooks (see `notebooks/`):
 
 ### Datasets Used
 
-| Dataset         | Description                                              |
-|-----------------|----------------------------------------------------------|
-| **UNSW-NB15**   | Network intrusion dataset from UNSW Canberra (primary)   |
-| **CIC-IDS-2017**| Canadian Institute for Cybersecurity IDS dataset          |
-| **CIC-IOT-2023**| IoT-specific network traffic dataset                     |
+| Dataset          | Description                                              |
+|------------------|----------------------------------------------------------|
+| **UNSW-NB15**    | Network intrusion dataset from UNSW Canberra (primary)   |
+| **CIC-IDS-2017** | Canadian Institute for Cybersecurity IDS dataset          |
+| **CIC-IOT-2023** | IoT-specific network traffic dataset                     |
 
 ### Training Pipeline (in `notebooks/draft_1/`)
 
@@ -285,16 +274,16 @@ The system uses **44 network flow features** extracted via CICFlowMeter, includi
 
 ## 🔧 Tech Stack
 
-| Component          | Technology                              |
-|--------------------|-----------------------------------------|
-| **ML (Stage 1)**   | XGBoost 3.2+                            |
-| **ML (Stage 2)**   | TensorFlow / Keras 2.21+               |
-| **Preprocessing**  | scikit-learn (RobustScaler)             |
-| **API Backend**     | FastAPI + Uvicorn                       |
-| **Dashboard**       | Streamlit + Plotly                      |
-| **Feature Extraction** | CICFlowMeter                        |
-| **Data Processing** | Pandas, NumPy                          |
-| **Package Manager** | uv                                     |
+| Component              | Technology                    |
+|------------------------|-------------------------------|
+| **ML (Stage 1)**       | XGBoost 3.2+                  |
+| **ML (Stage 2)**       | TensorFlow / Keras 2.21+      |
+| **Preprocessing**      | scikit-learn (RobustScaler)   |
+| **API Backend**        | FastAPI + Uvicorn             |
+| **Dashboard**          | Streamlit + Plotly            |
+| **Feature Extraction** | CICFlowMeter                  |
+| **Data Processing**    | Pandas, NumPy                 |
+| **Package Manager**    | uv                            |
 
 ---
 
@@ -319,4 +308,3 @@ This project is open-source and available under the [MIT License](LICENSE).
 Built with 🧠 ML + 🛡️ Cybersecurity in mind
 
 </div>
-]]>
