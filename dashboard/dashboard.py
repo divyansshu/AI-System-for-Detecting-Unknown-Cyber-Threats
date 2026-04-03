@@ -167,7 +167,7 @@ if st.session_state.monitoring:
         payload = {"features": packet_features}
 
         try:
-            response = requests.post("http://127.0.0.1:8000/scan-traffic", json=payload, timeout=2)
+            response = requests.post("http://127.0.0.1:8000/scan-traffic", json=payload, timeout=10)
 
             if response.status_code == 200:
                 result = response.json()
