@@ -1,4 +1,54 @@
-# Ignore large data files
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and runtime output
+*.log
+logs/
+tmp/
+temp/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+postgres-data/
+pgdata/
+
+# Large/local datasets and generated captures
 data/CIC-IDS2017/
 data/CICIOT23/
+data/raw/
+data/processed/
+data/generated/
+data/*.pcap
+data/*.pcapng
+capture/*.pcap
+capture/*.pcapng
 live_demo.pcapng
+
+# Keep demo CSVs tracked only when intentionally added.
+# Uncomment this if live flow output should become local-only:
+# data/live_flows.csv
