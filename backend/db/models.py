@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime
-from datetime import datetime
+from datetime import datetime, timezone
 from db.database import Base
 
 class ThreatAlert(Base):
@@ -7,7 +7,7 @@ class ThreatAlert(Base):
 
     # defining the columns
     id = Column(Integer, primary_key=True, index=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     action = Column(String, index=True)
     threat_type = Column(String)
     caught_by = Column(String)
