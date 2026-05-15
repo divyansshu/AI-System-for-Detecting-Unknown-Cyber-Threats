@@ -2,15 +2,18 @@
 
 # 🛡️ Next-Gen Hybrid SOC Pipeline
 
-### AI System for Detecting Unknown Cyber Threats
+### Enterprise Event-Driven AI System for Detecting Unknown Cyber Threats
 
 ![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![Apache Kafka](https://img.shields.io/badge/Apache_Kafka-231F20?style=for-the-badge&logo=apachekafka&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-FF6F00?style=for-the-badge&logo=tensorflow&logoColor=white)
 ![XGBoost](https://img.shields.io/badge/XGBoost-189FDD?style=for-the-badge&logo=xgboost&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2CA5E0?style=for-the-badge&logo=docker&logoColor=white)
 
-A **two-stage intrusion detection system** that combines a supervised XGBoost classifier with an unsupervised deep-learning Autoencoder to detect both **known attack patterns** and **novel zero-day anomalies** in real-time network traffic.
+A decoupled, event-driven intrusion detection system that combines a supervised XGBoost classifier with an unsupervised deep-learning Autoencoder to detect both known attack patterns and novel zero-day anomalies in real-time network traffic.
 
 [Features](#-features) · [Architecture](#-architecture) · [Quick Start](#-quick-start) · [Usage](#-usage) · [Project Structure](#-project-structure)
 
@@ -20,68 +23,52 @@ A **two-stage intrusion detection system** that combines a supervised XGBoost cl
 
 ## ✨ Features
 
-- **Two-Stage Detection Pipeline** — XGBoost catches known attacks; an Autoencoder catches what XGBoost misses.
-- **Zero-Day Anomaly Detection** — Flags traffic that deviates from learned "normal" patterns, even if never seen before.
-- **Real-Time Dashboard** — Streamlit-based SOC command center with live charts, anomaly scores, and event logs.
-- **REST API** — FastAPI backend exposes a `/scan-traffic` endpoint for programmatic integration.
-- **Attack Simulator** — Built-in script to inject synthetic zero-day traffic for live demonstrations.
-- **Feature Extraction** — Converts raw `.pcapng` captures into ML-ready flow features via `cicflowmeter`.
+- **Event-driven ingestion** using Apache Kafka in KRaft mode.
+- **Two-stage ML pipeline** with XGBoost for known attacks and a Keras Autoencoder for zero-day anomalies.
+- **Persistent threat logging** to PostgreSQL through SQLAlchemy.
+- **Live SOC dashboard** with total flows, normal flows, alert counts, Stage-2 anomaly scores, event tables, and terminal-style alert output.
+- **Alias-aware feature mapping** from `cicflowmeter` CSV columns into the exact 44-feature model order.
+- **Fast demo replay controls** for limiting or sampling rows from `live_flows.csv`.
+- **Manual API fallback** through FastAPI `/scan-traffic`.
 
 ---
 
 ## 🏗 Architecture
 
-<div align="center">
-
-![Architecture Diagram](docs/architecture.png)
-
-</div>
-
-The pipeline processes network traffic through two sequential ML stages:
-
-### Stage 1 — XGBoost Supervised Filter
-
-| Aspect    | Detail                                                               |
-|-----------|----------------------------------------------------------------------|
-| **Model** | XGBoost binary classifier (`xgboost_stage1.pkl`)                    |
-| **Purpose** | Detect **known** attack categories learned from labeled training data |
-| **Output** | `1` → Known attack → **Blocked** · `0` → Passed to Stage 2         |
-
-### Stage 2 — Autoencoder Anomaly Detector
-
-| Aspect        | Detail                                                                    |
-|---------------|---------------------------------------------------------------------------|
-| **Model**     | Keras deep Autoencoder (`autoencoder_stage2.h5`)                          |
-| **Purpose**   | Catch **unknown / zero-day** threats that bypassed Stage 1                |
-| **Method**    | Measures reconstruction error (MAE) against a dynamic threshold           |
-| **Threshold** | `0.1331` (stored in `ae_threshold.json`, tuned on validation data)        |
-| **Output**    | MAE > threshold → **Blocked** (zero-day) · MAE ≤ threshold → **Allowed** |
-
-### Decision Summary
-```
-                         ┌──────────────────────┐
-    Network Traffic ───► │  Stage 1: XGBoost    │
-                         └──────────┬───────────┘
-                                    │
-                        ┌───────────┴───────────┐
-                        │                       │
-                   Known Attack             Benign (0)
-                   prediction = 1               │
-                        │               ┌───────▼───────────┐
-                        │               │ Stage 2: Autoenc.  │
-                   🚨 BLOCKED           └───────┬───────────┘
-                  (Known Attack)                │
-                                    ┌───────────┴───────────┐
-                                    │                       │
-                              MAE > threshold         MAE ≤ threshold
-                                    │                       │
-                               💀 BLOCKED              ✅ ALLOWED
-                            (Zero-Day Anomaly)      (Normal Traffic)
+```text
+data/live_demo.pcapng
+        │
+        ▼
+capture/extract_features.py
+        │
+        ▼
+data/live_flows.csv
+        │
+        ▼
+kafka-scripts/produce_normal_traffic.py
+        │  44-feature JSON payloads
+        ▼
+Apache Kafka topic: network-traffic
+        │
+        ▼
+backend/app/main.py
+        │  XGBoost -> Autoencoder
+        ▼
+PostgreSQL table: threat_alerts
+        │
+        ▼
+frontend/dashboard.py
 ```
 
-### Data Preprocessing
+### Detection Flow
 
-All features are scaled using a **RobustScaler** (`robust_scaler.pkl`) before being fed into either model, ensuring resilience to outliers in network traffic data.
+| Stage | Model | Purpose | Output |
+|-------|-------|---------|--------|
+| Stage 1 | XGBoost classifier | Detect known malicious mathematical signatures | `BLOCKED`, `Stage 1 (XGBoost)` |
+| Stage 2 | Keras Autoencoder | Detect anomalous reconstruction error after Stage 1 passes a flow | `BLOCKED`, `Stage 2 (Autoencoder)` |
+| Normal | XGBoost + Autoencoder | Flow passes both checks | `ALLOWED`, `Passed Both Stages` |
+
+All incoming arrays must contain exactly 44 float features. The backend validates this for API requests and Kafka messages. The scaler is loaded from `models/robust_scaler.pkl`, and the Autoencoder threshold is loaded from `models/ae_threshold.json`.
 
 ---
 
@@ -89,222 +76,340 @@ All features are scaled using a **RobustScaler** (`robust_scaler.pkl`) before be
 
 ### Prerequisites
 
-- **Python 3.12+**
-- **[uv](https://docs.astral.sh/uv/)** (recommended) or `pip`
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/)
+- Docker Desktop
+- PostgreSQL with a database named `soc_db`
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/divyansshu/AI-System-for-Detecting-Unknown-Cyber-Threats.git
-cd AI-System-for-Detecting-Unknown-Cyber-Threats
+The default `.env` values are:
+
+```env
+DB_URL=postgresql://postgres:postgres@localhost:5432/soc_db
+KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+KAFKA_TOPIC=network-traffic
 ```
 
-### 2. Install Dependencies
+### 1. Install Dependencies
 
-Using **uv** (recommended):
 ```bash
 uv sync
 ```
 
-Or using **pip**:
+The project pins `scikit-learn==1.6.1` because the saved scaler artifact was trained with that version.
+
+### 2. Start Kafka
+
 ```bash
-pip install -e .
+docker compose up -d
 ```
 
-### 3. Extract Features (Optional)
+Kafka is exposed on:
 
-If you have a raw `.pcapng` capture file and need to generate flow features:
-```bash
-python extract_features.py
+```text
+localhost:9092
 ```
 
-> This produces `live_flows.csv` from `live_demo.pcapng` using `cicflowmeter`.
+Kafka UI is available at:
 
-### 4. Start the API Server
-```bash
-cd api
-uvicorn app:app --reload
+```text
+http://localhost:8080
 ```
 
-The API will be available at `http://127.0.0.1:8000`. Visit the root endpoint to confirm:
+Create the required Kafka topic:
+
+```bash
+uv run python kafka-scripts/create_topics.py
+```
+
+### 3. Start PostgreSQL
+
+Create the database if it does not already exist:
+
+```sql
+CREATE DATABASE soc_db;
+```
+
+The backend creates the `threat_alerts` table automatically on startup.
+
+### 4. Start the Backend
+
+```bash
+uv run uvicorn app.main:app --reload --app-dir backend
+```
+
+Health check:
+
+```text
+http://127.0.0.1:8000
+```
+
+Expected response:
+
 ```json
 { "message": "Hybrid SOC Pipeline is actively monitoring" }
 ```
 
-### 5. Launch the Dashboard
+### 5. Start the Dashboard
 
-In a separate terminal:
+In a second terminal:
+
 ```bash
-cd dashboard
-streamlit run dashboard.py
+uv run streamlit run frontend/dashboard.py
 ```
 
-The SOC Command Center will open at `http://localhost:8501`.
+Dashboard URL:
+
+```text
+http://localhost:8501
+```
+
+### 6. Replay Normal Traffic
+
+In a third terminal:
+
+```bash
+uv run python kafka-scripts/produce_normal_traffic.py
+```
+
+By default, the producer streams only the first 200 rows for a faster demo.
+
+Useful replay options:
+
+```bash
+uv run python kafka-scripts/produce_normal_traffic.py --limit 50 --delay 0
+uv run python kafka-scripts/produce_normal_traffic.py --limit 100 --sample
+uv run python kafka-scripts/produce_normal_traffic.py --limit 0
+```
+
+Option meanings:
+
+| Option | Meaning |
+|--------|---------|
+| `--limit 50` | Stream only 50 rows |
+| `--limit 0` | Stream every row from `live_flows.csv` |
+| `--sample` | Randomly sample rows instead of taking the first N |
+| `--delay 0` | Send rows with no artificial pause |
+
+You can also set defaults in `.env`:
+
+```env
+NORMAL_TRAFFIC_LIMIT=100
+NORMAL_TRAFFIC_DELAY=0.05
+```
+
+### 7. Inject Synthetic Zero-Day Traffic
+
+```bash
+uv run python kafka-scripts/produce_attack_traffic.py
+```
+
+This sends synthetic 44-feature anomaly payloads directly into Kafka. These are intentionally extreme, so Stage 2 anomaly scores can be much higher than normal traffic scores.
 
 ---
 
 ## 📖 Usage
 
-### Running the Full Demo
+### Extract Features from PCAP
 
-1. Start the **FastAPI backend** (Terminal 1):
 ```bash
-   cd api && uvicorn app:app --reload
+uv run python capture/extract_features.py
 ```
 
-2. Start the **Streamlit dashboard** (Terminal 2):
-```bash
-   cd dashboard && streamlit run dashboard.py
+This reads:
+
+```text
+data/live_demo.pcapng
 ```
 
-3. Click **▶ Start Monitoring** in the dashboard sidebar. The system will:
-   - **Replay** existing packets from `live_flows.csv` (one per second)
-   - Switch to **Listening Mode** once replay completes, watching for new packets
+and writes:
 
-4. Inject a **simulated zero-day attack** (Terminal 3):
-```bash
-   python unknown_attack.py
+```text
+data/live_flows.csv
 ```
-   Watch the dashboard light up with 🚨 alerts as the Autoencoder catches the anomalies!
 
-### API Reference
+The extractor avoids Scapy's offline BPF filter path so Windows users do not need `tcpdump` just to parse the bundled PCAP.
 
-#### `POST /scan-traffic`
+### Manual API Scan
 
-Classify a single network flow.
+`POST /scan-traffic`
 
-**Request Body:**
+Request body:
+
 ```json
 {
-  "features": [443.0, 120456.0, 15.0, 8420.0, "... (44 float values)"]
+  "features": [0.0, 0.0, 0.0, "... exactly 44 float values"]
 }
 ```
 
-**Responses:**
+Normal response:
 
-| Scenario         | `action`  | `threat_type`                | `caught_by`              |
-|------------------|-----------|------------------------------|--------------------------|
-| Known attack     | `Blocked` | `Known Attack`               | `Stage 1 (XGBoost)`     |
-| Zero-day anomaly | `Blocked` | `Potential Zero-day Anomaly` | `Stage 2 (Autoencoder)` |
-| Normal traffic   | `Allowed` | `None`                       | `Passed Both stages`     |
-
-#### `GET /`
-
-Health check endpoint.
 ```json
-{ "message": "Hybrid SOC Pipeline is actively monitoring" }
+{
+  "action": "ALLOWED",
+  "threat_type": "None",
+  "caught_by": "Passed Both Stages",
+  "details": "Normal Traffic rhythm verified. Error: 0.0772"
+}
 ```
 
-### Interactive API Docs
+Classification outcomes:
 
-FastAPI auto-generates interactive documentation:
+| Scenario | `action` | `threat_type` | `caught_by` |
+|----------|----------|---------------|-------------|
+| Known attack | `BLOCKED` | `Known Attack` | `Stage 1 (XGBoost)` |
+| Zero-day anomaly | `BLOCKED` | `Potential Zero-day Anomaly` | `Stage 2 (Autoencoder)` |
+| Normal traffic | `ALLOWED` | `None` | `Passed Both Stages` |
 
-- **Swagger UI** — `http://127.0.0.1:8000/docs`
-- **ReDoc** — `http://127.0.0.1:8000/redoc`
+Interactive API docs:
+
+- Swagger UI: `http://127.0.0.1:8000/docs`
+- ReDoc: `http://127.0.0.1:8000/redoc`
+
+---
+
+## 📊 Dashboard
+
+The Streamlit dashboard reads from PostgreSQL, not directly from `live_flows.csv`.
+
+It shows:
+
+- **Total Flows**: all rows logged in `threat_alerts`
+- **Normal Flows**: rows that passed both stages
+- **Total Alerts**: Stage 1 + Stage 2 detections
+- **Avg Stage-2 Score**: average Autoencoder MAE for recent Stage 2 anomalies
+- **Recent Stage-2 Anomaly Scores** with the Autoencoder threshold line
+- **Traffic Distribution** by normal, Stage 1, and Stage 2 categories
+- **Recent Events** with an option to include normal traffic
+
+If Stage 2 scores are very high after running `produce_attack_traffic.py`, that is expected. The attack producer deliberately sends out-of-distribution synthetic values to demonstrate Autoencoder blocking.
 
 ---
 
 ## 📁 Project Structure
-```
+
+```text
 zero_day_detector/
 │
-├── api/
-│   └── app.py                  # FastAPI backend — loads models, exposes /scan-traffic
+├── backend/
+│   ├── app/
+│   │   └── main.py                  # FastAPI app, model loading, Kafka consumer
+│   └── db/
+│       ├── database.py              # SQLAlchemy PostgreSQL connection
+│       └── models.py                # threat_alerts table model
 │
-├── dashboard/
-│   ├── dashboard.py            # Streamlit SOC Command Center (real-time UI)
-│   ├── live_flows.csv          # Flow data consumed by the dashboard
-│   └── UNSW-NB15_1.csv         # Training/reference dataset
+├── capture/
+│   └── extract_features.py          # PCAP -> live_flows.csv extraction
+│
+├── data/
+│   ├── live_demo.pcapng             # Demo packet capture
+│   └── live_flows.csv               # Extracted flow rows
+│
+├── frontend/
+│   └── dashboard.py                 # Streamlit SOC dashboard
+│
+├── kafka-scripts/
+│   ├── create_topics.py             # Creates network-traffic topic
+│   ├── produce_normal_traffic.py    # Streams mapped CSV rows into Kafka
+│   └── produce_attack_traffic.py    # Sends synthetic zero-day payloads
 │
 ├── models/
-│   ├── xgboost_stage1.pkl      # Stage 1 — trained XGBoost classifier
-│   ├── autoencoder_stage2.h5   # Stage 2 — trained Keras Autoencoder
-│   ├── robust_scaler.pkl       # RobustScaler for feature preprocessing
-│   └── ae_threshold.json       # Dynamic anomaly threshold (0.1331)
+│   ├── xgboost_stage1.pkl           # Stage 1 XGBoost model
+│   ├── autoencoder_stage2.h5        # Stage 2 Autoencoder model
+│   ├── robust_scaler.pkl            # Preprocessing scaler
+│   └── ae_threshold.json            # Autoencoder threshold
 │
-├── notebooks/
-│   ├── cyber_attack_prediction (XGBoost Classifier).ipynb
-│   ├── cyber_attack_prediction_CIC-IOT2023.ipynb
-│   ├── cyber_attack_prediction_with_CIC-IDS-2017.ipynb
-│   └── draft_1/
-│       ├── Data_Engineering_and_EDA.ipynb    # Data cleaning & exploration
-│       ├── XGBoost_Classifier.ipynb          # Stage 1 model training
-│       ├── AutoEncoder.ipynb                 # Stage 2 model training
-│       └── Hybrid_Pipeline.ipynb             # Combined pipeline evaluation
-│
-├── extract_features.py         # PCAP → CSV feature extraction (cicflowmeter)
-├── unknown_attack.py           # Zero-day attack simulator for demos
-├── main.py                     # Project entry point
-├── pyproject.toml              # Project config & dependencies
+├── notebooks/                       # Training and experimentation notebooks
+├── tests/                           # FastAPI contract tests
+├── docker-compose.yaml              # Kafka and Kafka UI
+├── pyproject.toml                   # Project dependencies
+├── uv.lock                          # Locked dependency graph
 └── README.md
 ```
 
 ---
 
-## 🧠 Model Training
+## 🧠 Model Notes
 
-The models were trained and evaluated in Jupyter notebooks (see `notebooks/`):
+The trained model artifacts are stored in `models/`.
 
-### Datasets Used
+Important runtime detail:
 
-| Dataset          | Description                                              |
-|------------------|----------------------------------------------------------|
-| **UNSW-NB15**    | Network intrusion dataset from UNSW Canberra (primary)   |
-| **CIC-IDS-2017** | Canadian Institute for Cybersecurity IDS dataset          |
-| **CIC-IOT-2023** | IoT-specific network traffic dataset                     |
+- `robust_scaler.pkl` was trained with scikit-learn `1.6.1`.
+- The project pins `scikit-learn==1.6.1` to avoid pickle compatibility warnings and possible inference drift.
+- The normal traffic producer maps all 44 expected model features from the current `cicflowmeter` CSV output using explicit aliases.
 
-### Training Pipeline (in `notebooks/draft_1/`)
+Datasets used during experimentation:
 
-1. **Data Engineering & EDA** — Cleaning, feature selection, handling class imbalance
-2. **XGBoost Classifier** — Supervised training on labeled attack/benign data
-3. **Autoencoder** — Unsupervised training on benign-only traffic to learn "normal" patterns
-4. **Hybrid Pipeline** — End-to-end evaluation of the two-stage system
-
-### Feature Set
-
-The system uses **44 network flow features** extracted via CICFlowMeter, including:
-
-- **Packet metrics** — sizes, counts, header lengths
-- **Flow statistics** — duration, bytes/s, packets/s
-- **Inter-arrival times** — mean, std, min, max (forward & backward)
-- **TCP flags** — FIN, RST, PSH, ACK, URG counts
-- **Window sizes** — initial forward/backward window bytes
-- **Activity patterns** — active/idle time statistics
+| Dataset | Description |
+|---------|-------------|
+| UNSW-NB15 | Network intrusion dataset from UNSW Canberra |
+| CIC-IDS-2017 | Canadian Institute for Cybersecurity IDS dataset |
+| CIC-IOT-2023 | IoT-specific network traffic dataset |
 
 ---
 
-## 🔧 Tech Stack
+## 🧪 Tests
 
-| Component              | Technology                    |
-|------------------------|-------------------------------|
-| **ML (Stage 1)**       | XGBoost 3.2+                  |
-| **ML (Stage 2)**       | TensorFlow / Keras 2.21+      |
-| **Preprocessing**      | scikit-learn (RobustScaler)   |
-| **API Backend**        | FastAPI + Uvicorn             |
-| **Dashboard**          | Streamlit + Plotly            |
-| **Feature Extraction** | CICFlowMeter                  |
-| **Data Processing**    | Pandas, NumPy                 |
-| **Package Manager**    | uv                            |
+Run:
 
----
+```bash
+uv run pytest
+```
 
-## 🤝 Contributing
+Current test coverage validates:
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/your-feature`)
-3. Commit your changes (`git commit -m 'Add your feature'`)
-4. Push to the branch (`git push origin feature/your-feature`)
-5. Open a Pull Request
+- FastAPI health endpoint
+- Missing payload handling
+- Invalid feature length handling
+- Basic 44-feature inference contract
+
+Expected result:
+
+```text
+4 passed
+```
 
 ---
 
-## 📄 License
+## 🛠 Troubleshooting
 
-This project is open-source and available under the [MIT License](LICENSE).
+### `scapy.error.Scapy_Exception: tcpdump is not available`
 
----
+Use the updated extractor:
 
-<div align="center">
+```bash
+uv run python capture/extract_features.py
+```
 
-Built with 🧠 ML + 🛡️ Cybersecurity in mind
+The script avoids Scapy's offline BPF filter, which is what triggers the `tcpdump` requirement on Windows.
 
-</div>
+### Dashboard Shows Normal Traffic as Alerts
+
+Older database rows may contain `Passed Both stages` with a lowercase `s`. The dashboard handles both old and new labels, but for a clean demo you can clear the table:
+
+```sql
+TRUNCATE TABLE threat_alerts RESTART IDENTITY;
+```
+
+Then replay traffic.
+
+### Dashboard Shows No Data
+
+Make sure all three pieces are running:
+
+```bash
+docker compose up -d
+uv run uvicorn app.main:app --reload --app-dir backend
+uv run python kafka-scripts/produce_normal_traffic.py --limit 50
+```
+
+### Kafka Topic Does Not Exist
+
+```bash
+uv run python kafka-scripts/create_topics.py
+```
+
+### Backend Cannot Connect to PostgreSQL
+
+Confirm PostgreSQL is running, `soc_db` exists, and `DB_URL` in `.env` matches your local credentials.
+
