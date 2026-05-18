@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛡️ Next-Gen Hybrid SOC Pipeline
+# 🛡️ AI-Based Zero-Day Cyber Attack Predictor
 
 ### Enterprise Event-Driven AI System for Detecting Unknown Cyber Threats
 
